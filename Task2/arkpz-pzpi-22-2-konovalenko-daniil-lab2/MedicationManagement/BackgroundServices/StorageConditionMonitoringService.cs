@@ -1,0 +1,37 @@
+﻿using MedicationManagement.Services;
+
+namespace MedicationManagement.BackgroundServices
+{
+    public class StorageConditionMonitoringService : BackgroundService
+    {
+        private readonly IServiceProvider _serviceProvider;
+
+        public StorageConditionMonitoringService(IServiceProvider serviceProvider)
+        {
+            _serviceProvider = serviceProvider;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                using (var scope = _serviceProvider.CreateScope())
+                {
+                    var storageConditionService = scope.ServiceProvider.GetRequiredService<IServiceStorageCondition>();
+
+                    // Моніторинг умов зберігання
+                    var violations = await storageConditionService.CheckStorageConditionsForAllDevices();
+
+                    foreach (var violation in violations)
+                    {
+                        // Логіка для надсилання сповіщень (email, SMS тощо)
+                        Console.WriteLine($"Notification: {violation}");
+                    }
+                }
+
+                // Затримка між перевірками (наприклад, кожні 5 хвилин)
+                await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken);
+            }
+        }
+    }
+}
