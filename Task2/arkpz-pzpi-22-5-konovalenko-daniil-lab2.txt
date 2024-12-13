@@ -1,0 +1,156 @@
+МІНІСТЕРСТВО ОСВІТИ І НАУКИ УКРАЇНИ
+ХАРКІВСЬКИЙ НАЦІОНАЛЬНИЙ
+УНІВЕРСИТЕТ РАДІОЕЛЕКТРОНІКИ
+Кафедра «Програмна інженерія»
+ЗВІТ
+з лабораторної роботи 2
+з дисципліни «Аналіз та рефакторинг коду»
+на тему «РОЗРОБКА БАЗИ ДАНИХ ДЛЯ СЕРВЕРНОЇ ЧАСТИНИ 
+ПРОГРАМНОЇ СИСТЕМИ ТА ПРИКЛАДНОГО ПРОГРАМНОГО 
+ІНТЕРФЕЙСУ (API)»
+Виконав: Прийняла:
+ст. гр. ПЗПІ-22-5 ст. викл. Дашенков Д.С.
+Коноваленко Даніїл Миколайович
+Харків 2024
+РОЗРОБКА БАЗИ ДАНИХ ДЛЯ СЕРВЕРНОЇ ЧАСТИНИ ПРОГРАМНОЇ 
+СИСТЕМИ ТА ПРИКЛАДНОГО ПРОГРАМНОГО ІНТЕРФЕЙСУ (API)
+2.1 Мета роботи:
+Розробити базу даних для серверної частини програмної системи та 
+прикладного програмного інтерфейсу.
+2.2 Опис інженерних рішень:
+Для реалізації програмної системи були прийняті такі інженерні рішення:
+1. Архітектура проєкту:
+a. Використано багаторівневу архітектуру із поділом на логічні рівні 
+(MVC);
+ Моделі (Models): визначають структуру даних, що 
+зберігаються в базі даних;
+ Контролери (Controllers): обробляють запити клієнтів і 
+відповідають за виклик відповідних методів сервісів;
+ Сервіси (Services): реалізують бізнес-логіку, включаючи 
+взаємодію з базою даних;
+ Фонові сервіси (BackgroundServices): автоматизовані 
+завдання, які виконуються у фоновому режимі (перевірка 
+терміну придатності медикаментів, перевірка умов 
+зберігання).
+b. Використано Entity Framework Core як ORM для роботи з базою 
+даних.
+2. Інструменти та технолоії:
+a. Серверна частина: ASP .NET Core 8.0;
+b. База даних: SQL Server, міграція через Entity Framework Core;
+c. Аутентифікація: реалізована через JWT (JSON Web Token);
+d. Документація API: автоматично генерується через Swagger;
+e. Фонові завдання: реалізовано через BackgroundService.
+3. Основна функціональність:
+a. Реєстрація та облік медикаментів;
+b. Автоматизовані сповіщення про медикаменти, термін придатності 
+яких закінчується;
+c. Додавання нових IoT-пристроїв, створення умов зберігання;
+d. Реєстрація та авторизація користувача.
+2.3 Специфікація API для взаємодії серверної частини з клієнтами
+Ендпоінти:
+1. Аутентифікація:
+a. POST /api/auth/login: Авторизація користувача;
+b. POST /api/auth/register: Реєстрація нового користувача;
+c. POST /api/auth/createrole: Створення нової ролі;
+d. POST /api/auth/assignrole: Видача ролі користувачу.
+2. Медикаменти
+a. GET /api/medicine: Отримати всі медикаменти;
+b. GET /api/medicine/{id}: Отримати інформацію про медикамент за 
+ID;
+c. POST /api/medicine: Додати новий медикамент;
+d. PATCH /api/medicine/{id}: Оновити інформацію про медикамент;
+e. DELETE /api/medicine/{id}: Видалити медикамент.
+3. IoT-пристрої:
+a. POST /api/IoTDevice: Додати новий пристрій;
+b. GET /api/IoTDevice: Отримати інформацію про всі пристрої;
+c. GET /api/IoTDevice/{id}: Отримати інформацію про окремий 
+пристрій за ID;
+d. PATCH /api/IoTDevice/{id}: Оновити інформацію про пристрій;
+e. DELETE /api/IoTDevice/{id}: Видалити пристрій.
+4. Умови зберігання:
+a. POST /api/storagecondition: Додати нові умови зберігання;
+b. GET /api/storagecondition: Отримати всі умови зберігання;
+c. GET /api/storagecondition/{id}: Отримати умови зберігання за ID;
+d. PATCH /api/storagecondition/{id}: Оновити умови зберігання;
+e. DELETE /api/storagecondition/{id}: Видалити умови зберігання.
+5. Аналітика:
+a. GET /api/medicine/low-stock?threshold={value}: Отримати 
+медикаменти з низьким запасом;
+b. GET /api/storagecondition/expiring?thresholdDate={value}:
+Отримати медикаменти в який закінчується;
+c. GET /api/storagecondition/checkcondition: Перевірити умови 
+зберігання медикаментів.
+2.4 Фрагменти програмного коду
+Логіка взаємодії серверної частини з БД
+Додавання нового медикаменту:
+public async Task<Medicine> Create(Medicine medicine)
+{
+ if (medicine == null)
+ {
+ _logger.LogError("Medicine object is null");
+ return null;
+ }
+ try
+ {
+ await _context.Medicines.AddAsync(medicine);
+ await _context.SaveChangesAsync();
+ return medicine;
+ }
+ catch (Exception ex)
+ {
+ _logger.LogError(ex.Message);
+ return null;
+ }
+}
+Перевірка медикаментів, термін придатності яких закінчується:
+public async Task<IEnumerable<Medicine>> GetExpiringMedicines(DateTime thresholdDate)
+{
+ var expiringMedicines = await _context.Medicines.Where(m => m.ExpiryDate <= 
+thresholdDate).ToListAsync();
+ return expiringMedicines;
+}
+Логіка взаємодії серверної частини з клієнтами
+Ендпоінт для додавання нового медикаменту:
+[HttpPost]
+[Authorize(Roles = "Administrator")]
+public async Task<IActionResult> Create([FromBody] Medicine medicine)
+{
+ if (ModelState.IsValid)
+ {
+ var result = await _medicineService.Create(medicine);
+ if (result != null)
+ {
+ return Ok(result);
+ }
+ return BadRequest("Medication is null");
+ }
+ return BadRequest(ModelState);
+}
+Ендпоінт для отримання аналітики за строком придатності:
+[HttpPost("expiring")]
+public async Task<IActionResult> GetExpiringMedicines(DateTime thresholdDate)
+{
+ var result = await _medicineService.GetExpiringMedicines(thresholdDate);
+ if (result != null)
+ {
+ return Ok(result);
+ }
+ return NotFound();
+}
+2.5 Графічні ілюстрації
+UML-діаграма прецедентів
+Рис. 2.1 - UML-діаграма прецедентів
+ER-діаграма даних
+Рис. 2.2 – ER-діаграма даних
+Діаграма структури бази даних
+Рис. 2.3 – Діаграма структури бази даних
+2.6 Висновок
+У цьому проєкті:
+ Розроблена серверна частина програмної системи з використанням 
+ASP.NET Core.
+ Реалізовані основні функції: облік медикаментів, інтеграція з IoTсенсорами, аналітика.
+ Розроблена база даних із застосуванням Entity Framework Core, 
+включаючи необхідні міграції.
+ Реалізовані фонові завдання для перевірки терміну придатності 
+медикаментів і умов зберігання.
+ API спроектовано з використанням принципів REST.
