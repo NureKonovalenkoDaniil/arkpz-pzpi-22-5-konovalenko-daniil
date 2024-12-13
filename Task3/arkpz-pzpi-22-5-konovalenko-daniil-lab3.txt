@@ -1,1 +1,205 @@
+МІНІСТЕРСТВО ОСВІТИ І НАУКИ УКРАЇНИ
+ 
+ХАРКІВСЬКИЙ НАЦІОНАЛЬНИЙ
+УНІВЕРСИТЕТ РАДІОЕЛЕКТРОНІКИ
+ 
+Кафедра «Програмна інженерія»
+ 
+ 
 
+ЗВІТ
+з лабораторної роботи 3  
+з дисципліни «Аналіз та рефакторинг коду»
+на тему «РОЗРОБКА БІЗНЕС-ЛОГІКИ ТА ФУНКЦІЙ АДМІНІСТРУВАННЯ СЕРВЕРНОЇ ЧАСТИНИ ПРОГРАМНОЇ СИСТЕМИ» 
+
+ 
+ 
+Виконав:                                                           	Прийняв:
+ст. гр. ПЗПІ-22-5                                    	    	ст. викл. Дашенков Д.С.
+Коноваленко Даніїл Миколайович
+
+
+
+
+
+Харків 2024
+ 
+3 РОЗРОБКА БІЗНЕС-ЛОГІКИ ТА ФУНКЦІЙ АДМІНІСТРУВАННЯ СЕРВЕРНОЇ ЧАСТИНИ ПРОГРАМНОЇ СИСТЕМИ
+
+3.1 Мета роботи:
+Розробити бізнес-логіку та функції адміністрування серверної частини програмної системи.
+
+3.2 Опис інженерних рішень:
+	Для розробки бізнес-логіки та функцій адміністрування серверної частини програмної системи були прийняті наступні інженерній рішення:
+1.	Функції бізнес-логіки:
+•	Обробка запасів медикаментів.
+•	Перевірка низьких запасів медикаментів.
+•	Генерація рекомендацій для поповнення запасів.
+•	Моніторинг IoT-сенсорів.
+•	Обробка стану сенсорів: активація/деактивація.
+•	Перевірка останніх умов зберігання, що зчитуються сенсорами.
+2.	Функції адміністрування:
+•	Управління ролями користувачів: призначення ролей (“Administrator”, “User”).
+•	Створення нових ролей.
+•	Управління сенсорами: активація/деактивація.
+•	Реалізація аудиту для відстеження ключових дій у системі.
+3.	Технології:
+•	Серверна частина за допомогою ASP.NET Core 8.0
+•	База даних реалізована з використанням EF Core та SQL Server. 
+•	Логіка моніторингу сенсорів використовує BackgroundService для періодичних перевірок умов зберігання.
+3.3 Фрагменти програмного коду
+	3.3.1 Бізнес-логіка
+•	Логіка перевірки низьких запасів медикаментів
+
+public async Task<List<Medicine>> GetLowStockMedicines(int threshold) 
+{ 
+return await _context.Medicines .Where(m => m.Quantity < threshold) .ToListAsync(); 
+}
+
+public async Task<List<ReplenishmentRecommendation>> GetReplenishmentRecommendations()
+{
+    var lowStockMedicines = await GetLowStockMedicines(10); // Поріг для низького запасу
+    return lowStockMedicines.Select(m => new ReplenishmentRecommendation
+    {
+        MedicineId = m.MedicineID,
+        MedicineName = m.Name,
+        RecommendedQuantity = 100 - m.Quantity // Рекомендація поповнити до 100 одиниць
+    }).ToList();
+}
+•	Логіка моніторингу умов зберігання
+
+
+public async Task<List<string>> MonitorStorageConditions()
+{
+    var devices = await _context.IoTDevices.ToListAsync();
+    var violations = new List<string>();
+
+    foreach (var device in devices)
+    {
+        var latestCondition = await _context.StorageConditions
+            .Where(sc => sc.DeviceID == device.DeviceID)
+            .OrderByDescending(sc => sc.Timestamp)
+            .FirstOrDefaultAsync();
+
+        if (latestCondition != null)
+        {
+            if (latestCondition.Temperature < device.MinTemperature || latestCondition.Temperature > device.MaxTemperature)
+            {
+                violations.Add($"Temperature violation for Device {device.DeviceID} at {latestCondition.Timestamp}: {latestCondition.Temperature}°C (Expected: {device.MinTemperature}–{device.MaxTemperature}°C)");
+            }
+
+            if (latestCondition.Humidity < device.MinHumidity || latestCondition.Humidity > device.MaxHumidity)
+            {
+                violations.Add($"Humidity violation for Device {device.DeviceID} at {latestCondition.Timestamp}: {latestCondition.Humidity}% (Expected: {device.MinHumidity}–{device.MaxHumidity}%)");
+            }
+        }
+    }
+
+    return violations;
+}
+	3.3.2 Адміністрування серверної частини
+•	Активація та деактивація сенсорів
+public async Task<bool> SetSensorStatus(int sensorId, bool isActive)
+{
+    var sensor = await _context.IoTDevices.FindAsync(sensorId);
+    if (sensor == null)
+        return false;
+
+    sensor.IsActive = isActive;
+    _context.IoTDevices.Update(sensor);
+    await _context.SaveChangesAsync();
+    return true;
+}
+
+[HttpPost("activate-sensor")]
+[Authorize(Roles = "Administrator")]
+public async Task<IActionResult> ActivateSensor(int sensorId)
+{
+    var result = await _iotDeviceService.SetSensorStatus(sensorId, true);
+    if (!result)
+        return NotFound("Sensor not found");
+
+    return Ok($"Sensor {sensorId} activated.");
+}
+
+[HttpPost("deactivate-sensor")]
+[Authorize(Roles = "Administrator")]
+public async Task<IActionResult> DeactivateSensor(int sensorId)
+{
+    var result = await _iotDeviceService.SetSensorStatus(sensorId, false);
+    if (!result)
+        return NotFound("Sensor not found");
+
+    return Ok($"Sensor {sensorId} deactivated.");
+}
+
+•	Логування дій
+public async Task LogAction(string action, string user, string details)
+{
+    var log = new AuditLog
+    {
+        Action = action,
+        User = user,
+        Timestamp = DateTime.UtcNow,
+        Details = details
+    };
+
+    _context.AuditLogs.Add(log);
+    await _context.SaveChangesAsync();
+}
+
+•	Створення та видача ролей
+[HttpPost("create-role")]
+[Authorize(Roles = "Administrator")]
+public async Task<IActionResult> CreateRole([FromBody] RoleDto roleDto)
+{
+    if (string.IsNullOrWhiteSpace(roleDto.RoleName))
+        return BadRequest("Role name is required.");
+
+    var roleExisting = await _roleManager.RoleExistsAsync(roleDto.RoleName);
+    if (roleExisting) return BadRequest($"Role name {roleDto.RoleName} already exists");
+
+    var role = new IdentityRole { Name = roleDto.RoleName };
+    var result = await _roleManager.CreateAsync(role);
+    if (result.Succeeded)
+    {
+        return Ok();
+    }
+    foreach (var error in result.Errors)
+    {
+        ModelState.AddModelError(string.Empty, error.Description);
+    }
+    return BadRequest(ModelState);
+}
+
+[HttpPost("assing-role")]
+[Authorize(Roles = "Administrator")]
+public async Task<IActionResult> AddUserToRole([FromBody] RoleDto roleDto)
+{
+    var user = await _userManager.FindByEmailAsync(roleDto.Email);
+    if (user == null)
+    {
+        return NotFound($"User with email: {roleDto.Email} not found");
+    }
+    var result = await _userManager.AddToRoleAsync(user, roleDto.RoleName);
+    if (result.Succeeded)
+    {
+        return Ok();
+    }
+    foreach (var error in result.Errors)
+    {
+        ModelState.AddModelError(string.Empty, error.Description);
+    }
+    return BadRequest(ModelState);
+}
+3.4 Графічні ілюстрації
+•	UML діаграма діяльності для серверної частини:
+ 
+Рис. 3.1 – Діаграма діяльності
+
+
+•	UML діаграма взаємодії для серверної частини:
+ 
+Рис. 3.2 – Діаграма взаємодії
+2.6 Висновок
+	В результаті виконання лабораторної роботи були створені функції бізнес-логіки та адміністрування.
