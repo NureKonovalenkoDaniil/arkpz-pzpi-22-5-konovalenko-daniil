@@ -1,0 +1,164 @@
+МІНІСТЕРСТВО ОСВІТИ І НАУКИ УКРАЇНИ
+ХАРКІВСЬКИЙ НАЦІОНАЛЬНИЙ
+УНІВЕРСИТЕТ РАДІОЕЛЕКТРОНІКИ
+Кафедра «Програмна інженерія»
+ЗВІТ
+з лабораторної роботи 4
+з дисципліни «Аналіз та рефакторинг коду»
+на тему «РОЗРОБКА IoT КЛІЄНТА 
+(БІЗНЕС-ЛОГІКИ ТА ФУНКЦІЙ НАЛАШТУВАННЯ)»
+Виконав: Прийняв:
+ст. гр. ПЗПІ-22-5 ст. викл. Дашенков Д.С.
+Коноваленко Даніїл Миколайович
+Харків 2024
+4 РОЗРОБКА IoT КЛІЄНТА
+(БІЗНЕС-ЛОГІКИ ТА ФУНКЦІЙ НАЛАШТУВАННЯ)
+4.1 Мета роботи:
+Розробити програмне забезпечення для IoT пристрою.
+4.2 Опис інженерних рішень:
+Розробка IoT-клієнта базувалася на необхідності забезпечити симуляцію 
+роботи реального IoT-пристрою з метою взаємодії з серверною частиною 
+системи. Було прийнято такі інженерні рішення:
+1. Емуляція IoT-сенсорів:
+ IoT-клієнт генерує випадкові значення температури та 
+вологості в межах заданих параметрів.
+ Дані генеруються за допомогою алгоритму з використанням 
+std::uniform_real_distribution.
+2. Бізнес-логіка:
+ Реалізовано перевірку значень на відповідність порогам 
+(мінімальним і максимальним значенням).
+ Дані про перевищення порогів фіксуються в консолі або 
+передаються на сервер.
+3. Налаштування IoT-клієнта:
+ Налаштування порогових значень мінімальної та максимальної 
+температури і вологості здійснюється через сервер.
+ Дані завантажуються через HTTP-запит із використанням 
+бібліотеки cpr.
+4. Протоколи взаємодії:
+ Для взаємодії з серверною частиною обрано HTTPS як
+надійний протокол передачі даних.
+ Дані надсилаються в форматі JSON.
+5. Гнучкість налаштувань:
+ Конфігурація IoT-клієнта оновлюється періодично, що 
+дозволяє враховувати зміни на сервері в реальному часі.
+4.3 Фрагменти програмного коду
+Код бізнес-логіки IoT-клієнта та налаштування IoT-клієнта наведено у 
+додатку А.
+4.4 Графічні ілюстрації
+1. UML діаграма прецедентів ІоТ клієнта:
+Рис. 4.1 - UML діаграма прецедентів ІоТ клієнта
+2. UML діаграма діяльності ІоТ клієнта:
+Рис. 4.2 - UML діаграма прецедентів ІоТ клієнта
+4.5 Висновок
+В результаті виконання лабораторної роботи було реалізовано IoT-клієнт 
+який симулює роботу пристрою з сенсорами температури та вологості. Бізнеслогіка на стороні сервера обробляє дані сенсорів і забезпечує перевірку 
+порогових значень.
+Додаток А
+Програмний код
+#include <iostream>
+#include <string>
+#include <random>
+#include <thread>
+#include <chrono>
+#include <cpr/cpr.h> // Бібліотека для відправки запитів
+#include <json/json.h> // Бібліотека для обробки JSON
+// Налаштування сервера
+const std::string serverUrl = "https://localhost:7069/api/iotdevice"; // Ендпоінт для 
+отримання інформації про пристрій
+const std::string dataSendUrl = "https://localhost:7069/api/storagecondition"; // Ендпоінт 
+для відправки даних
+// Параметри сенсора (значення за замовчуванням)
+float minTemperature = 2.0;
+float maxTemperature = 8.0;
+float minHumidity = 30.0;
+float maxHumidity = 70.0;
+int deviceID = 2; // ID пристрою
+// Генерація випадкових значень
+float generateRandomValue(float min, float max) {
+ std::random_device rd;
+ std::mt19937 gen(rd());
+ std::uniform_real_distribution<> dis(min, max);
+ return dis(gen);
+}
+// Отримання інформації про пристрій з сервера
+void fetchDeviceInfo(const std::string& jwtToken) {
+ std::string url = serverUrl + "/" + std::to_string(deviceID);
+ cpr::Response response = cpr::Get(
+ cpr::Url{ url },
+ cpr::Header{ {"Authorization", "Bearer " + jwtToken} }
+ );
+ if (response.status_code == 200) {
+ try {
+ Json::CharReaderBuilder reader;
+ Json::Value deviceInfo;
+ std::string errs;
+ std::istringstream responseStream(response.text);
+ if (Json::parseFromStream(reader, responseStream, &deviceInfo, &errs)) {
+ minTemperature = deviceInfo["minTemperature"].asFloat();
+ maxTemperature = deviceInfo["maxTemperature"].asFloat();
+ minHumidity = deviceInfo["minHumidity"].asFloat();
+ maxHumidity = deviceInfo["maxHumidity"].asFloat();
+ std::cout << "Device configuration updated from server:\n"
+ << "Min Temperature: " << minTemperature << "\n"
+ << "Max Temperature: " << maxTemperature << "\n"
+ << "Min Humidity: " << minHumidity << "\n"
+ << "Max Humidity: " << maxHumidity << "\n";
+ }
+ else {
+ std::cerr << "Failed to parse device info JSON: " << errs << std::endl;
+ }
+ }
+ catch (const std::exception& e) {
+ std::cerr << "Error while processing server response: " << e.what() << std::endl;
+ }
+ }
+ else {
+ std::cerr << "Failed to fetch device info. Status code: " << response.status_code << 
+std::endl;
+ }
+}
+// Відправка даних на сервер
+void sendDataToServer(float temperature, float humidity) {
+ cpr::Response response = cpr::Post(
+ cpr::Url{ dataSendUrl },
+ cpr::Header{ {"Content-Type", "application/json"} },
+ cpr::Body{ "{\"temperature\": " + std::to_string(temperature) +
+ ", \"humidity\": " + std::to_string(humidity) +
+ ", \"deviceID\": " + std::to_string(deviceID) + "}" }
+ );
+ if (response.status_code == 200) {
+ std::cout << "Data sent successfully: " << response.text << std::endl;
+ }
+ else {
+ std::cerr << "Failed to send data. Status code: " << response.status_code << 
+std::endl;
+ }
+}
+int main() {
+ SetConsoleOutputCP(CP_UTF8); // Установлення кодування UTF-8 для виводу
+ SetConsoleCP(CP_UTF8); // Установлення кодування UTF-8 для вводу
+ std::cout << "Starting IoT Device Emulator for device ID: " << deviceID << std::endl;
+ std::string jwtToken = “{ token value }”;
+ // Початкове завантаження інформації про пристрій
+ fetchDeviceInfo(jwtToken);
+ while (true) {
+ // Генерація випадкових даних
+ float temperature = generateRandomValue(minTemperature - 5, maxTemperature + 
+5);
+ float humidity = generateRandomValue(minHumidity - 10, maxHumidity + 10);
+ // Вивід даних у консоль
+ std::cout << "Generated Data -> Temperature: " << temperature
+ << "°C, Humidity: " << humidity << "%" << std::endl;
+ // Відправка даних на сервер
+ sendDataToServer(temperature, humidity);
+ // Оновлення інформації про пристрій кожні 60 секунд
+ static int counter = 0;
+ if (counter % 12 == 0) { // Раз на 12 циклів (60 секунд, якщо цикл 5 секунд)
+ fetchDeviceInfo(jwtToken);
+ }
+ counter++;
+ // Затримка перед наступною ітерацією (5 секунд)
+ std::this_thread::sleep_for(std::chrono::seconds(5));
+ }
+ return 0;
+}
